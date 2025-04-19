@@ -6,33 +6,51 @@ function getBotToken() {
 // Check if bot is admin in channel using Telegram API directly
 function isBotAdmin(channel, callback) {
   let botToken = getBotToken();
-  let botId = user.telegramid;
+  let botId = user.telegramid; // Changed from user.telegramid to bot.id
 
-  let chatUrl = "https://api.telegram.org/bot" + botToken + "/getChatMember?chat_id=" + channel + "&user_id=" + botId;
-  let response = JSON.parse(UrlFetchApp.fetch(chatUrl));
-  let status = response.result.status;
-
-  if (status === "administrator" || status === "creator") {
-    callback({ ok: true });
-  } else {
-    callback({ ok: false, reason: "Bot is not admin in " + channel });
-  }
+  let chatUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${channel}&user_id=${botId}`;
+  
+  HTTP.get(chatUrl, {}, function(err, response) {
+    if (err) {
+      callback({ ok: false, reason: "API request failed" });
+      return;
+    }
+    
+    try {
+      let data = JSON.parse(response.content);
+      let status = data.result.status;
+      
+      if (status === "administrator" || status === "creator") {
+        callback({ ok: true });
+      } else {
+        callback({ ok: false, reason: `Bot is not admin in ${channel}` });
+      }
+    } catch (e) {
+      callback({ ok: false, reason: "Failed to parse API response" });
+    }
+  });
 }
 
 // Check if user is in the channel
 function isUserInChannel(channel, userId, callback) {
   let token = getBotToken();
-  let url = "https://api.telegram.org/bot" + token + "/getChatMember?chat_id=" + channel + "&user_id=" + userId;
+  let url = `https://api.telegram.org/bot${token}/getChatMember?chat_id=${channel}&user_id=${userId}`;
 
-  try {
-    let response = UrlFetchApp.fetch(url);
-    let data = JSON.parse(response);
-    let status = data.result.status;
-    let isMember = ["member", "administrator", "creator"].includes(status);
-    callback(isMember);
-  } catch (e) {
-    callback(false);
-  }
+  HTTP.get(url, {}, function(err, response) {
+    if (err) {
+      callback(false);
+      return;
+    }
+    
+    try {
+      let data = JSON.parse(response.content);
+      let status = data.result.status;
+      let isMember = ["member", "administrator", "creator"].includes(status);
+      callback(isMember);
+    } catch (e) {
+      callback(false);
+    }
+  });
 }
 
 // Validate function
