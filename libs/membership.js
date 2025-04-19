@@ -1,108 +1,101 @@
-// Get bot token
+// Membership validation library
 function getBotToken() {
-  return bot.token;
+  return bot.token; // Make sure your bot has this property
 }
 
-// Check if bot is admin in channel using Telegram API directly
 function isBotAdmin(channel, callback) {
-  let botToken = getBotToken();
-  let botId = user.telegramid; // Changed from user.telegramid to bot.id
+  const botToken = getBotToken();
+  const botId = user.telegramid; // The bot's own user ID
 
-  let chatUrl = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${channel}&user_id=${botId}`;
+  const url = `https://api.telegram.org/bot${botToken}/getChatMember?chat_id=${channel}&user_id=${botId}`;
   
-  HTTP.get(chatUrl, {}, function(err, response) {
+  HTTP.get(url, {}, (err, response) => {
     if (err) {
-      callback({ ok: false, reason: "API request failed" });
+      callback({ ok: false, reason: "Failed to check bot admin status" });
       return;
     }
     
     try {
-      let data = JSON.parse(response.content);
-      let status = data.result.status;
-      
-      if (status === "administrator" || status === "creator") {
-        callback({ ok: true });
+      const data = JSON.parse(response.content);
+      if (data.ok) {
+        const status = data.result.status;
+        callback({ 
+          ok: ["administrator", "creator"].includes(status),
+          reason: status === "administrator" || status === "creator" 
+            ? null 
+            : `Bot needs admin rights in ${channel}`
+        });
       } else {
-        callback({ ok: false, reason: `Bot is not admin in ${channel}` });
+        callback({ ok: false, reason: data.description || "Unknown Telegram API error" });
       }
     } catch (e) {
-      callback({ ok: false, reason: "Failed to parse API response" });
+      callback({ ok: false, reason: "Invalid API response" });
     }
   });
 }
 
-// Check if user is in the channel
 function isUserInChannel(channel, userId, callback) {
-  let token = getBotToken();
-  let url = `https://api.telegram.org/bot${token}/getChatMember?chat_id=${channel}&user_id=${userId}`;
+  const token = getBotToken();
+  const url = `https://api.telegram.org/bot${token}/getChatMember?chat_id=${channel}&user_id=${userId}`;
 
-  HTTP.get(url, {}, function(err, response) {
+  HTTP.get(url, {}, (err, response) => {
     if (err) {
       callback(false);
       return;
     }
     
     try {
-      let data = JSON.parse(response.content);
-      let status = data.result.status;
-      let isMember = ["member", "administrator", "creator"].includes(status);
-      callback(isMember);
+      const data = JSON.parse(response.content);
+      const status = data.result?.status;
+      callback(["member", "administrator", "creator"].includes(status));
     } catch (e) {
       callback(false);
     }
   });
 }
 
-// Validate function
 function validateMembership(params) {
-  let channels = params.channels;
-  let userId = params.user_id;
-  let onCheck = params.onCheck;
+  const { channels, user_id, onCheck } = params;
 
-  if (!channels || !userId || !onCheck) {
-    return Bot.sendMessage("Missing required parameters in Libs.membership.validate()");
+  if (!channels || !user_id || !onCheck) {
+    throw new Error("Missing required parameters");
   }
 
-  // Step 1: Check all bot admins
-  let i = 0;
-  function checkBotNext() {
-    if (i >= channels.length) return checkUser();
-
-    isBotAdmin(channels[i], function(result) {
+  // Check bot admin status first
+  (function checkNextBotAdmin(index) {
+    if (index >= channels.length) return checkUserMembership(0);
+    
+    isBotAdmin(channels[index], (result) => {
       if (!result.ok) {
         return onCheck({
           status: false,
           is_joined: false,
-          error_message: result.reason
+          error_message: result.reason || `Bot is not admin in ${channels[index]}`
         });
       }
-      i++;
-      checkBotNext();
+      checkNextBotAdmin(index + 1);
     });
-  }
+  })(0);
 
-  // Step 2: Check if user joined all
-  let j = 0;
-  function checkUser() {
-    if (j >= channels.length) return onCheck({ status: true, is_joined: true });
+  // Then check user membership
+  function checkUserMembership(index) {
+    if (index >= channels.length) {
+      return onCheck({ status: true, is_joined: true });
+    }
 
-    isUserInChannel(channels[j], userId, function(joined) {
-      if (!joined) {
+    isUserInChannel(channels[index], user_id, (isMember) => {
+      if (!isMember) {
         return onCheck({
           status: true,
           is_joined: false,
-          error_message: channels[j]
+          error_message: channels[index]
         });
       }
-      j++;
-      checkUser();
+      checkUserMembership(index + 1);
     });
   }
-
-  checkBotNext();
 }
 
-// Export
 publish({
   validate: validateMembership
 });
