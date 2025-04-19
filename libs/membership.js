@@ -1,116 +1,90 @@
-function ensureBotId(callback) {
-  let id = Bot.getProperty("my_bot_id");
-  if (id) return callback(id);
-
-  Api.getMe({
-    on_result: function(res) {
-      Bot.setProperty("my_bot_id", res.id, "integer");
-      callback(res.id);
-    },
-    on_error: function() {
-      callback(null);
-    }
-  });
+// Get bot token
+function getBotToken() {
+  return bot.token;
 }
 
-function isBotAdminInChannel(channel, callback) {
-  Api.getChatMember({
-    chat_id: channel,
-    user_id: Bot.getProperty("my_bot_id"),
-    on_result: function(res) {
-      let status = res.status;
-      callback(status === "administrator" || status === "creator");
-    },
-    on_error: function() {
-      callback(false);
-    }
-  });
-}
+// Check if bot is admin in channel using Telegram API directly
+function isBotAdmin(channel, callback) {
+  let botToken = getBotToken();
+  let botId = user.telegramid;
 
-function isBotAdminInAll(channels, done) {
-  ensureBotId(function(botId) {
-    if (!botId) return done({ ok: false, reason: "Cannot get bot ID" });
+  let chatUrl = "https://api.telegram.org/bot" + botToken + "/getChatMember?chat_id=" + channel + "&user_id=" + botId;
+  let response = JSON.parse(UrlFetchApp.fetch(chatUrl));
+  let status = response.result.status;
 
-    let i = 0;
-    function next() {
-      if (i >= channels.length) return done({ ok: true });
-
-      isBotAdminInChannel(channels[i], function(isAdmin) {
-        if (!isAdmin) return done({ ok: false, reason: "Bot not admin in: " + channels[i] });
-        i++;
-        next();
-      });
-    }
-
-    next();
-  });
-}
-
-function isUserInChannel(channel, userId, callback) {
-  Api.getChatMember({
-    chat_id: channel,
-    user_id: userId,
-    on_result: function(res) {
-      let status = res.status;
-      callback(["member", "administrator", "creator"].includes(status));
-    },
-    on_error: function() {
-      callback(false);
-    }
-  });
-}
-
-function isUserInAll(channels, userId, done) {
-  let i = 0;
-  function next() {
-    if (i >= channels.length) return done({ ok: true });
-
-    isUserInChannel(channels[i], userId, function(joined) {
-      if (!joined) return done({ ok: false, notJoinedChannel: channels[i] });
-      i++;
-      next();
-    });
+  if (status === "administrator" || status === "creator") {
+    callback({ ok: true });
+  } else {
+    callback({ ok: false, reason: "Bot is not admin in " + channel });
   }
-
-  next();
 }
 
-// Public function
+// Check if user is in the channel
+function isUserInChannel(channel, userId, callback) {
+  let token = getBotToken();
+  let url = "https://api.telegram.org/bot" + token + "/getChatMember?chat_id=" + channel + "&user_id=" + userId;
+
+  try {
+    let response = UrlFetchApp.fetch(url);
+    let data = JSON.parse(response);
+    let status = data.result.status;
+    let isMember = ["member", "administrator", "creator"].includes(status);
+    callback(isMember);
+  } catch (e) {
+    callback(false);
+  }
+}
+
+// Validate function
 function validateMembership(params) {
   let channels = params.channels;
   let userId = params.user_id;
   let onCheck = params.onCheck;
 
   if (!channels || !userId || !onCheck) {
-    return Bot.sendMessage("Missing parameters for membership validation.");
+    return Bot.sendMessage("Missing required parameters in Libs.membership.validate()");
   }
 
-  isBotAdminInAll(channels, function(botCheck) {
-    if (!botCheck.ok) {
-      return onCheck({
-        status: false,
-        is_joined: false,
-        error_message: botCheck.reason
-      });
-    }
+  // Step 1: Check all bot admins
+  let i = 0;
+  function checkBotNext() {
+    if (i >= channels.length) return checkUser();
 
-    isUserInAll(channels, userId, function(userCheck) {
-      if (!userCheck.ok) {
+    isBotAdmin(channels[i], function(result) {
+      if (!result.ok) {
+        return onCheck({
+          status: false,
+          is_joined: false,
+          error_message: result.reason
+        });
+      }
+      i++;
+      checkBotNext();
+    });
+  }
+
+  // Step 2: Check if user joined all
+  let j = 0;
+  function checkUser() {
+    if (j >= channels.length) return onCheck({ status: true, is_joined: true });
+
+    isUserInChannel(channels[j], userId, function(joined) {
+      if (!joined) {
         return onCheck({
           status: true,
           is_joined: false,
-          error_message: userCheck.notJoinedChannel
+          error_message: channels[j]
         });
       }
-
-      onCheck({
-        status: true,
-        is_joined: true
-      });
+      j++;
+      checkUser();
     });
-  });
+  }
+
+  checkBotNext();
 }
 
+// Export
 publish({
   validate: validateMembership
 });
