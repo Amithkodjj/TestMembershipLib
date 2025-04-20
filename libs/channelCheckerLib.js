@@ -1,73 +1,70 @@
 function isBotAdmin(chatId) {
   const botToken = bot.token;
   const botId = user.telegramid;
-  const apiUrl = "https://api.telegram.org/bot" + botToken + "/getChatMember?chat_id=" + chatId + "&user_id=" + botId;
-  return HTTP.get(apiUrl, { json: true }).then(function(response) {
-    const result = response.result;
-    return result && (result.status === "administrator" || result.status === "creator");
+  const url = "https://api.telegram.org/bot" + botToken + "/getChatMember?chat_id=" + chatId + "&user_id=" + botId;
+
+  return HTTP.get(url, { json: true }).then(function(r) {
+    if (!r || !r.result) return false;
+    let status = r.result.status;
+    return status === "administrator" || status === "creator";
+  }).catch(function(e) {
+    return false;
   });
 }
 
 function isUserJoinedChannel(chatId) {
   const botToken = bot.token;
   const userId = user.telegramid;
-  const apiUrl = "https://api.telegram.org/bot" + botToken + "/getChatMember?chat_id=" + chatId + "&user_id=" + userId;
-  return HTTP.get(apiUrl, { json: true }).then(function(response) {
-    const result = response.result;
-    const status = result.status;
-    return ["member", "administrator", "creator"].indexOf(status) > -1;
+  const url = "https://api.telegram.org/bot" + botToken + "/getChatMember?chat_id=" + chatId + "&user_id=" + userId;
+
+  return HTTP.get(url, { json: true }).then(function(r) {
+    if (!r || !r.result) return false;
+    let status = r.result.status;
+    return ["member", "administrator", "creator"].includes(status);
+  }).catch(function(e) {
+    return false;
   });
 }
 
 function checkUserInAllChannels(channels, onSuccess, onFail) {
   var isAdmin = true;
   var isJoined = true;
+  var index = 0;
 
-  function checkNext(index) {
+  function nextCheck() {
     if (index >= channels.length) {
       if (!isAdmin) {
-        onFail({
-          status: false,
-          is_joined: false,
-          error_message: "❌ The bot is not admin in one or more channels. Please make the bot admin and try again."
-        });
+        onFail({ error_message: "❌ Bot is not admin in one or more channels." });
       } else if (!isJoined) {
-        onSuccess({
-          status: true,
-          is_joined: false,
-          error_message: "⚠️ You have not joined all required channels yet. We'll keep checking every few minutes."
-        });
+        onSuccess({ is_joined: false, error_message: "⚠️ You haven't joined all channels yet." });
       } else {
-        onSuccess({
-          status: true,
-          is_joined: true
-        });
+        onSuccess({ is_joined: true });
       }
       return;
     }
 
-    const channelId = channels[index];
-
-    isBotAdmin(channelId).then(function(adminStatus) {
-      if (!adminStatus) {
+    let chatId = channels[index];
+    isBotAdmin(chatId).then(function(adminOK) {
+      if (!adminOK) {
         isAdmin = false;
-        checkNext(channels.length);
+        index = channels.length; // Exit early
+        nextCheck();
         return;
       }
 
-      isUserJoinedChannel(channelId).then(function(joined) {
+      isUserJoinedChannel(chatId).then(function(joined) {
         if (!joined) {
           isJoined = false;
-          checkNext(channels.length);
-          return;
+          index = channels.length; // Exit early
+        } else {
+          index++;
         }
-
-        checkNext(index + 1);
+        nextCheck();
       });
     });
   }
 
-  checkNext(0);
+  nextCheck();
 }
 
 function scheduleJoinCheck(channels, minutes, onJoined) {
@@ -76,19 +73,19 @@ function scheduleJoinCheck(channels, minutes, onJoined) {
       if (result.is_joined) {
         onJoined();
       } else {
-        Bot.sendMessage(result.error_message + "\n\n⏳ Next check in " + minutes + " minute(s)...");
+        Bot.sendMessage(result.error_message + "\n\n⏳ We'll check again in " + minutes + " minute(s).");
         Bot.run({
           command: "recheck_join_status",
+          run_at: Date.now() + minutes * 60 * 1000,
           options: {
             channels: channels,
             minutes: minutes
-          },
-          run_at: Date.now() + minutes * 60 * 1000
+          }
         });
       }
     },
     function(error) {
-      Bot.sendMessage("Error: " + error.error_message);
+      Bot.sendMessage(error.error_message || "Something went wrong checking channel status.");
     }
   );
 }
