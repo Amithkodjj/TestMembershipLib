@@ -4,7 +4,7 @@ let API_URL = "https://api.openai.com/v1/";
 // === API KEY SET/GET ===
 function setApiKey(key) {
   Bot.setProperty(libPrefix + "_apikey", key, "string");
-  Bot.sendMessage("Setup - SUCCESS, you need to add billing option then only it will work ")
+  Bot.sendMessage("Setup - SUCCESS, you need to add billing option then only it will work - https://platform.openai.com/settings/organization/billing/overview ")
 }
 
 function getApiKey() {
