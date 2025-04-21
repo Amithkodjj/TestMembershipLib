@@ -1,5 +1,5 @@
-let libPrefix = "gptLib"; // You can rename to "deepseeklib" if desired
-let API_URL = "https://api.deepseek.com/v1/"; // Replace with actual DeepSeek endpoint if different
+let libPrefix = "webSearchLib";
+let API_URL = "https://api.langsearch.com/v1/web-search"; // Replace with your actual free web search API
 
 // === API KEY SET/GET ===
 function setApiKey(key) {
@@ -8,73 +8,66 @@ function setApiKey(key) {
 
 function getApiKey() {
   let key = Bot.getProperty(libPrefix + "_apikey");
-  if (!key) throw new Error("GPTLib: API key not set. Use setApiKey()");
+  if (!key) throw new Error("WebSearchLib: API key not set. Use setApiKey() to set your key.");
   return key;
 }
 
-// === ASK DEEPSEEK ===
+// === PERFORM SEARCH REQUEST ===
 function ask(options) {
-  if (!options || !options.prompt) throw "GPTLib: 'prompt' is required";
+  if (!options || !options.prompt) throw "WebSearchLib: 'prompt' (search query) is required";
 
   let key = getApiKey();
 
   let body = {
-    model: options.model || "deepseek-chat",
-    messages: [{ role: "user", content: options.prompt }],
-    temperature: options.temperature || 0.7
+    query: options.prompt
   };
 
   Bot.setProperty(libPrefix + "_ctx_" + user.id, options, "json");
 
   HTTP.post({
-    url: API_URL + "chat/completions",
+    url: API_URL,
     body: body,
     headers: {
       Authorization: "Bearer " + key,
       "Content-Type": "application/json"
     },
-    success: libPrefix + "_onText",
+    success: libPrefix + "_onSearchSuccess",
     error: libPrefix + "_onError"
   });
 }
 
-// === IMAGE GENERATION NOT SUPPORTED BY DEEPSEEK ===
-// (Commented out since DeepSeek doesn't support image generation)
-function image(options) {
-  Api.sendMessage({
-    chat_id: user.telegramid,
-    text: "*GPTLib Error:* DeepSeek does not support image generation.",
-    parse_mode: "Markdown"
-  });
-}
-
-// === HANDLE TEXT RESPONSE ===
-function onText() {
+// === HANDLE SEARCH RESULT ===
+function onSearchSuccess() {
   let res;
   try {
     res = JSON.parse(content);
   } catch (e) {
     Api.sendMessage({
       chat_id: user.telegramid,
-      text: "*GPTLib Error:* Invalid JSON response",
+      text: "*WebSearchLib Error:* Failed to parse API response. It might not be valid JSON.",
       parse_mode: "Markdown"
     });
     return;
   }
 
-  let message = res?.choices?.[0]?.message?.content;
-  if (!message) {
+  let results = res?.results;
+  if (!results || results.length === 0) {
     Api.sendMessage({
       chat_id: user.telegramid,
-      text: "*GPTLib Error:* No response from DeepSeek",
+      text: "*WebSearchLib Notice:* No results found for your query.",
       parse_mode: "Markdown"
     });
     return;
   }
+
+  let message = "*Web Search Results:*\n\n";
+  results.forEach((item, index) => {
+    message += `${index + 1}. [${item.title}](${item.url})\n`;
+  });
 
   Api.sendMessage({
     chat_id: user.telegramid,
-    text: "*DeepSeek Reply:*\n\n" + message,
+    text: message,
     parse_mode: "Markdown"
   });
 }
@@ -91,7 +84,7 @@ function onError() {
 
   Api.sendMessage({
     chat_id: user.telegramid,
-    text: "*DeepSeek Error:*\n`" + message + "`",
+    text: "*WebSearchLib API Error:*\n`" + message + "`",
     parse_mode: "Markdown"
   });
 }
@@ -99,10 +92,9 @@ function onError() {
 // === EXPORT FUNCTIONS ===
 publish({
   setApiKey: setApiKey,
-  ask: ask,
-  image: image // Just placeholder, won't work for DeepSeek
+  ask: ask
 });
 
 // === REGISTER EVENTS ===
-on(libPrefix + "_onText", onText);
+on(libPrefix + "_onSearchSuccess", onSearchSuccess);
 on(libPrefix + "_onError", onError);
